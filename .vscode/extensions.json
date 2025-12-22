@@ -1,0 +1,16 @@
+{
+  "recommendations": [
+    "ms-kubernetes-tools.vscode-kubernetes-tools",
+    "ms-vscode.docker",
+    "hashicorp.terraform",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "mhutchie.git-graph",
+    "github.copilot",
+    "postman.postman-for-vscode",
+    "redhat.vscode-yaml",
+    "humao.rest-client",
+    "ms-vscode-remote.remote-wsl",
+    "rangav.vscode-thunder-client"
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "editor.defaultFormatter": "ms-python.python",
+
+  "[terraform]": {
+    "editor.defaultFormatter": "hashicorp.terraform",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
+
+  "python.linting.enabled": true,
+  "python.linting.pylintPath": "pylint",
+
+  // 🔐 Security Settings
+  "security.workspace.trust.enabled": true,
+  "security.workspace.trust.untrustedFiles": "open",
+  "git.autofetch": true,
+  "git.enableSmartCommit": true,
+  "telemetry.telemetryLevel": "off",
+  "privacy.displayProductLicenseTexts": false,
+
+  // 🎨 Color Customization
+  "workbench.colorCustomizations": {
+    "editor.background": "#0d1117",
+    "editor.foreground": "#c9d1d9",
+    "editor.selectionBackground": "#388bfd40",
+    "editor.lineHighlightBackground": "#161b22",
+    "editorCursor.foreground": "#58a6ff"
+  },
+  "editor.tokenColorCustomizations": {
+    "comments": "#8b949e",
+    "strings": "#a371f7",
+    "numbers": "#79c0ff"
+  },
+
+  // 📊 Dashboard / Home
+  "workbench.startupEditor": "newUntitledFile",
+  "workbench.commandPalette.preserveInput": true
+}

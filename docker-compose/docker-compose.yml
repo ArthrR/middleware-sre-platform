@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # WSO2 API Manager
+  wso2-apim:
+    image: wso2/wso2am:4.0.0
+    container_name: wso2-apim
+    ports:
+      - "8280:8280"    # HTTP
+      - "8243:8243"    # HTTPS
+      - "9443:9443"    # Management
+    environment:
+      - WSO2_SERVER_PROFILE=api-manager
+      - JAVA_OPTS=-Xmx2048m -Xms2048m
+    volumes:
+      - wso2_data:/home/wso2carbon/wso2am-4.0.0
+    networks:
+      - wso2-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:9443/am/services/HealthCheckService"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: wso2-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: wso2am_db
+      MYSQL_USER: wso2_user
+      MYSQL_PASSWORD: wso2_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - wso2-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: wso2-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - wso2-network
+    restart: unless-stopped
+
+  # Grafana Visualization
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: wso2-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - wso2-network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ELK Stack - Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.0.0
+    container_name: wso2-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - wso2-network
+    restart: unless-stopped
+
+  # ELK Stack - Kibana
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.0.0
+    container_name: wso2-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    networks:
+      - wso2-network
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+networks:
+  wso2-network:
+    driver: bridge
+
+volumes:
+  wso2_data:
+  mysql_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
