@@ -1,6 +1,6 @@
 # WSO2 Demo Lab – SRE / DevOps Practice
 
-This repository contains a local lab to practice SRE and DevOps concepts using WSO2 and an observability stack.  
+This repository contains a local lab to practice SRE and DevOps concepts using WSO2 and an observability stack.
 It is organized to simulate a small production-like environment with APIs, metrics, logs and infrastructure as code.
 
 ## Structure
@@ -25,6 +25,7 @@ From the `docker-compose` folder:
 
 docker compose up -d
 docker compose ps
+
 
 Then access, for example:
 
