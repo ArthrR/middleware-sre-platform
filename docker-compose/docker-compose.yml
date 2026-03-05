@@ -1,122 +1,317 @@
 version: '3.8'
 
+#==============================================================================
+# Enterprise Middleware & Infrastructure SRE Platform
+# Stack: Nginx, Tomcat, Node.js, PostgreSQL, Redis, Prometheus, Grafana, ELK
+#==============================================================================
+
 services:
-  # WSO2 API Manager
-  wso2-apim:
-    image: wso2/wso2am:4.0.0
-    container_name: wso2-apim
+  #----------------------------------------------------------------------------
+  # REVERSE PROXY & LOAD BALANCER
+  #----------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-lb
     ports:
-      - "8280:8280"    # HTTP
-      - "8243:8243"    # HTTPS
-      - "9443:9443"    # Management
-    environment:
-      - WSO2_SERVER_PROFILE=api-manager
-      - JAVA_OPTS=-Xmx2048m -Xms2048m
+      - "80:80"
+      - "443:443"
     volumes:
-      - wso2_data:/home/wso2carbon/wso2am-4.0.0
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
     networks:
-      - wso2-network
+      - frontend
+      - backend
+    depends_on:
+      - tomcat-app
+      - nodejs-api
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://localhost:9443/am/services/HealthCheckService"]
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  #----------------------------------------------------------------------------
+  # JAVA APPLICATION SERVER (Tomcat)
+  #----------------------------------------------------------------------------
+  tomcat-app:
+    image: tomcat:10-jdk17
+    container_name: tomcat-app
+    ports:
+      - "8080:8080"
+    environment:
+      - CATALINA_OPTS=-Xmx1024m -Xms512m
+      - JAVA_OPTS=-Djava.security.egd=file:/dev/./urandom
+    volumes:
+      - ./apps/java:/usr/local/tomcat/webapps
+      - tomcat_logs:/usr/local/tomcat/logs
+    networks:
+      - backend
+      - database
+    depends_on:
+      - postgres
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    depends_on:
-      - mysql
     restart: unless-stopped
 
-  # MySQL Database
-  mysql:
-    image: mysql:8.0
-    container_name: wso2-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: wso2am_db
-      MYSQL_USER: wso2_user
-      MYSQL_PASSWORD: wso2_password
+  #----------------------------------------------------------------------------
+  # NODE.JS API SERVER
+  #----------------------------------------------------------------------------
+  nodejs-api:
+    image: node:18-alpine
+    container_name: nodejs-api
+    working_dir: /app
     ports:
-      - "3306:3306"
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://appuser:apppass@postgres:5432/appdb
+      - REDIS_URL=redis://redis:6379
     volumes:
-      - mysql_data:/var/lib/mysql
+      - ./apps/nodejs:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm start"
     networks:
-      - wso2-network
+      - backend
+      - database
+    depends_on:
+      - postgres
+      - redis
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  #----------------------------------------------------------------------------
+  # DATABASE - PostgreSQL
+  #----------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppass
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
-  # Prometheus Monitoring
+  #----------------------------------------------------------------------------
+  # CACHE LAYER - Redis
+  #----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redispass
+    volumes:
+      - redis_data:/data
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  #----------------------------------------------------------------------------
+  # MONITORING - Prometheus
+  #----------------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:latest
-    container_name: wso2-prometheus
+    container_name: prometheus
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
     networks:
-      - wso2-network
+      - monitoring
+      - backend
     restart: unless-stopped
 
-  # Grafana Visualization
+  #----------------------------------------------------------------------------
+  # MONITORING - Node Exporter (System Metrics)
+  #----------------------------------------------------------------------------
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  #----------------------------------------------------------------------------
+  # VISUALIZATION - Grafana
+  #----------------------------------------------------------------------------
   grafana:
     image: grafana/grafana-oss:latest
-    container_name: wso2-grafana
+    container_name: grafana
     ports:
       - "3000:3000"
     environment:
+      - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=redis-datasource
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
-      - wso2-network
+      - monitoring
     depends_on:
       - prometheus
     restart: unless-stopped
 
-  # ELK Stack - Elasticsearch
+  #----------------------------------------------------------------------------
+  # LOGGING - Elasticsearch
+  #----------------------------------------------------------------------------
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.0.0
-    container_name: wso2-elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "9200:9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
-      - wso2-network
+      - logging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     restart: unless-stopped
 
-  # ELK Stack - Kibana
+  #----------------------------------------------------------------------------
+  # LOGGING - Logstash
+  #----------------------------------------------------------------------------
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: logstash
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - nginx_logs:/logs/nginx:ro
+      - tomcat_logs:/logs/tomcat:ro
+    networks:
+      - logging
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  #----------------------------------------------------------------------------
+  # LOGGING - Kibana
+  #----------------------------------------------------------------------------
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.0.0
-    container_name: wso2-kibana
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
     ports:
       - "5601:5601"
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     networks:
-      - wso2-network
+      - logging
     depends_on:
       - elasticsearch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     restart: unless-stopped
 
+  #----------------------------------------------------------------------------
+  # MESSAGE QUEUE - RabbitMQ (Optional)
+  #----------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+#==============================================================================
+# NETWORKS
+#==============================================================================
 networks:
-  wso2-network:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  database:
+    driver: bridge
+  monitoring:
+    driver: bridge
+  logging:
     driver: bridge
 
+#==============================================================================
+# VOLUMES
+#==============================================================================
 volumes:
-  wso2_data:
-  mysql_data:
+  postgres_data:
+  redis_data:
   prometheus_data:
   grafana_data:
   elasticsearch_data:
+  rabbitmq_data:
+  nginx_logs:
+  tomcat_logs:
