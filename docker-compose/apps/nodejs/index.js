@@ -9,12 +9,12 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Enterprise API v2',
     endpoints: ['/health', '/api/users']
   });
 });
 
 app.listen(port, () => {
-  console.log(\`API listening on port \${port}\`);
+  console.log(`API listening on port ${port}`);
 });
