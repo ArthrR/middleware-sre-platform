@@ -10,7 +10,7 @@
 
 ## 📖 About This Project
 
-This repository serves as a **comprehensive SRE reference platform** showcasing enterprise-grade infrastructure patterns, monitoring strategies, and automation practices. It evolved from a simple WSO2 API Manager demo into a full-stack learning environment covering the core technologies found in 95% of modern enterprise environments.
+This repository serves as a **comprehensive SRE reference platform** showcasing enterprise-grade infrastructure patterns, monitoring strategies, and automation practices. It provides a full-stack learning environment covering the core technologies found in 95% of modern enterprise environments.
 
 **Purpose:** Educational sandbox for practicing SRE workflows, troubleshooting scenarios, and demonstrating technical proficiency across diverse middleware technologies.
 
