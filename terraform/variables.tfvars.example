@@ -1,0 +1,12 @@
+# =============================================================
+# Example variable overrides for middleware-sre-platform
+# Copy to terraform.tfvars and adjust as needed
+# Never commit terraform.tfvars to version control!
+# =============================================================
+
+kubeconfig_path  = "~/.kube/config"
+kube_context     = "docker-desktop"   # or "minikube", "kind-kind"
+namespace        = "enterprise-middleware"
+environment      = "local"             # local | staging | prod
+app_replicas     = 2
+enable_monitoring = true

@@ -1,0 +1,202 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ─── Stage 1: Lint & Validate ───────────────────────────────────────
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Kubernetes manifests
+        uses: azure/k8s-lint@v1
+        with:
+          manifests: |
+            kubernetes/namespace.yaml
+            kubernetes/nginx.yaml
+            kubernetes/nodejs.yaml
+            kubernetes/postgres.yaml
+            kubernetes/redis.yaml
+            kubernetes/tomcat.yaml
+            kubernetes/monitoring.yaml
+            kubernetes/ingress.yaml
+
+      - name: Lint Docker Compose
+        run: |
+          cd docker-compose
+          docker compose config --quiet
+          echo "✅ Docker Compose config is valid"
+
+      - name: Validate Prometheus config
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/prometheus:/etc/prometheus \
+            prom/prometheus:latest \
+            --config.file=/etc/prometheus/prometheus.yml \
+            --web.listen-address=":9999" &
+          sleep 3
+          kill %1 2>/dev/null || true
+          echo "✅ Prometheus config is valid"
+
+  # ─── Stage 2: Build Docker Image ────────────────────────────────────
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: lint
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/nodejs-app
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: docker-compose/apps/nodejs
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Stage 3: Deploy to Kubernetes ──────────────────────────────────
+  deploy:
+    name: Deploy to Cluster
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Apply namespace and configs
+        run: |
+          kubectl apply -f kubernetes/namespace.yaml
+          echo "✅ Namespace applied"
+
+      - name: Update image tag in deployment
+        run: |
+          IMAGE_TAG=$(echo "${{ needs.build.outputs.image_tag }}" | head -1)
+          kubectl set image deployment/nodejs-app \
+            nodejs-app=${IMAGE_TAG} \
+            -n enterprise-middleware \
+            --record
+          echo "🚀 Deploying image: ${IMAGE_TAG}"
+
+      - name: Apply remaining manifests
+        run: |
+          kubectl apply -f kubernetes/ -n enterprise-middleware
+          echo "✅ All manifests applied"
+
+      - name: Wait for rollout
+        id: rollout
+        run: |
+          echo "⏳ Waiting for rollout to complete..."
+          if kubectl rollout status deployment/nodejs-app \
+              -n enterprise-middleware \
+              --timeout=180s; then
+            echo "✅ Rollout successful"
+            echo "rollout_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Rollout failed — triggering rollback"
+            echo "rollout_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Rollback on failure
+        if: failure() && steps.rollout.outputs.rollout_status == 'failed'
+        run: |
+          echo "🔄 Rolling back deployment..."
+          kubectl rollout undo deployment/nodejs-app -n enterprise-middleware
+          kubectl rollout status deployment/nodejs-app \
+            -n enterprise-middleware \
+            --timeout=120s
+          echo "✅ Rollback completed"
+
+  # ─── Stage 4: Post-Deploy Health Check ──────────────────────────────
+  healthcheck:
+    name: Post-Deploy Health Check
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Run health checks
+        run: |
+          chmod +x scripts/bash/healthcheck-deploy.sh
+          bash scripts/bash/healthcheck-deploy.sh
+
+      - name: Verify SLO — pod availability
+        run: |
+          READY=$(kubectl get deployment nodejs-app \
+            -n enterprise-middleware \
+            -o jsonpath='{.status.readyReplicas}')
+          DESIRED=$(kubectl get deployment nodejs-app \
+            -n enterprise-middleware \
+            -o jsonpath='{.spec.replicas}')
+
+          if [ "$READY" -eq "$DESIRED" ]; then
+            echo "✅ SLO check passed: $READY/$DESIRED pods ready"
+          else
+            echo "❌ SLO check failed: only $READY/$DESIRED pods ready"
+            exit 1
+          fi
+
+      - name: Notify deploy success
+        if: success()
+        run: |
+          echo "🎉 Deployment completed successfully!"
+          echo "   Commit: ${{ github.sha }}"
+          echo "   Author: ${{ github.actor }}"
+          echo "   Branch: ${{ github.ref_name }}"
