@@ -240,10 +240,10 @@ MIT License - Feel free to use for learning purposes.
 
 ## 👤 Author
 
-**Arthur Oliveira**  
-SRE @ IBM  
+**Arthur Silvestre Oliveira**  
+Site Reliability Engineer | Open to Work  
 📧 arthur.oliveiraa254@gmail.com  
-🔗 [LinkedIn](https://linkedin.com/in/arthur-oliveira) | [GitHub](https://github.com/ArthrR)
+🔗 [LinkedIn](https://linkedin.com/in/arthur-s-oliveira) | [GitHub](https://github.com/ArthrR) | [Credly](https://www.credly.com/users/arthur-silvestre-oliveira)
 
 ---
 
