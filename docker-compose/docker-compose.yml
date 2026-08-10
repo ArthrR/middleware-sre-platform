@@ -1,8 +1,7 @@
-version: '3.8'
-
 #==============================================================================
-# Enterprise Middleware & Infrastructure SRE Platform
-# Stack: Nginx, Tomcat, Node.js, PostgreSQL, Redis, Prometheus, Grafana, ELK
+# ai-platform-lab — Middleware & AI Platform Stack
+# Core: Nginx, Tomcat, Node.js, PostgreSQL, Redis, Prometheus, Grafana, ELK
+# AI ("ai" profile): Ollama, Qdrant, AI Gateway (FastAPI RAG/chat), MLflow
 #==============================================================================
 
 services:
@@ -288,6 +287,104 @@ services:
       retries: 5
     restart: unless-stopped
 
+  #----------------------------------------------------------------------------
+  # AI PLATFORM ("ai" profile) — opt in with: docker compose --profile ai up -d
+  #----------------------------------------------------------------------------
+
+  # LLM SERVING - Ollama (CPU-friendly local inference; see docs/ARCHITECTURE.md
+  # for why Ollama over vLLM on this stack)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - ai
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    profiles: ["ai"]
+
+  # VECTOR DATABASE - Qdrant (RAG retrieval store)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - ai
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    profiles: ["ai"]
+
+  # AI GATEWAY - FastAPI chat + RAG endpoints, Prometheus metrics
+  ai-gateway:
+    build:
+      context: ./apps/ai-gateway
+    container_name: ai-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:1b}
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION_NAME:-lab-docs}
+    volumes:
+      - ../:/repo:ro
+    networks:
+      - ai
+      - monitoring
+    depends_on:
+      - ollama
+      - qdrant
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    profiles: ["ai"]
+
+  # EXPERIMENT TRACKING - MLflow (tracking server + model registry)
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.17.2
+    container_name: mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    networks:
+      - ai
+      - monitoring
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health', timeout=2).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    profiles: ["ai"]
+
 #==============================================================================
 # NETWORKS
 #==============================================================================
@@ -302,6 +399,8 @@ networks:
     driver: bridge
   logging:
     driver: bridge
+  ai:
+    driver: bridge
 
 #==============================================================================
 # VOLUMES
@@ -315,3 +414,6 @@ volumes:
   rabbitmq_data:
   nginx_logs:
   tomcat_logs:
+  ollama_data:
+  qdrant_data:
+  mlflow_data:

@@ -1,5 +1,5 @@
 # =============================================================================
-# middleware-sre-platform — Terraform Infrastructure
+# ai-platform-lab — Terraform Infrastructure
 # Provisions local Kubernetes resources via the kubernetes provider
 # Compatible with: Minikube, Kind, Docker Desktop K8s
 # =============================================================================
@@ -21,7 +21,7 @@ terraform {
   # Uncomment to use remote state (e.g., Terraform Cloud or S3)
   # backend "s3" {
   #   bucket = "your-tfstate-bucket"
-  #   key    = "middleware-sre-platform/terraform.tfstate"
+  #   key    = "ai-platform-lab/terraform.tfstate"
   #   region = "us-east-1"
   # }
 }
@@ -84,6 +84,12 @@ variable "enable_monitoring" {
   default     = true
 }
 
+variable "enable_ai_platform" {
+  description = "Deploy the AI platform add-ons (ai-gateway ConfigMap, Qdrant via Helm). Ollama and MLflow stay docker-compose-only — see docs/ARCHITECTURE.md."
+  type        = bool
+  default     = false
+}
+
 # ─── Namespace ────────────────────────────────────────────────────────────────
 
 resource "kubernetes_namespace" "platform" {
@@ -94,7 +100,7 @@ resource "kubernetes_namespace" "platform" {
       name        = var.namespace
       environment = var.environment
       managed-by  = "terraform"
-      project     = "middleware-sre-platform"
+      project     = "ai-platform-lab"
     }
 
     annotations = {
@@ -248,6 +254,51 @@ resource "helm_release" "kube_prometheus_stack" {
   depends_on = [kubernetes_namespace.platform]
 }
 
+# ─── AI Platform: ai-gateway config + Qdrant via Helm ────────────────────────
+# Ollama and MLflow are deliberately left out of Terraform/Kubernetes — they're
+# heavier/stateful services better suited to docker-compose on a laptop-sized
+# cluster. See docs/ARCHITECTURE.md.
+
+resource "kubernetes_config_map" "ai_gateway_config" {
+  count = var.enable_ai_platform ? 1 : 0
+
+  metadata {
+    name      = "ai-gateway-config"
+    namespace = kubernetes_namespace.platform.metadata[0].name
+    labels    = { managed-by = "terraform", app = "ai-gateway" }
+  }
+
+  data = {
+    OLLAMA_BASE_URL   = "http://host.docker.internal:11434"
+    OLLAMA_MODEL      = "llama3.2:1b"
+    OLLAMA_EMBED_MODEL = "nomic-embed-text"
+    QDRANT_URL        = "http://qdrant-service:6333"
+    QDRANT_COLLECTION = "lab-docs"
+  }
+}
+
+resource "helm_release" "qdrant" {
+  count = var.enable_ai_platform ? 1 : 0
+
+  name       = "qdrant"
+  repository = "https://qdrant.github.io/qdrant-helm"
+  chart      = "qdrant"
+  namespace  = kubernetes_namespace.platform.metadata[0].name
+  version    = "0.12.5"
+
+  set {
+    name  = "replicaCount"
+    value = "1"
+  }
+
+  set {
+    name  = "persistence.size"
+    value = "2Gi"
+  }
+
+  depends_on = [kubernetes_namespace.platform]
+}
+
 # ─── Outputs ─────────────────────────────────────────────────────────────────
 
 output "namespace" {
@@ -263,6 +314,11 @@ output "platform_config_name" {
 output "monitoring_enabled" {
   description = "Whether monitoring stack is deployed"
   value       = var.enable_monitoring
+}
+
+output "ai_platform_enabled" {
+  description = "Whether the AI platform add-ons (ai-gateway config, Qdrant) are deployed"
+  value       = var.enable_ai_platform
 }
 
 output "environment" {

@@ -240,5 +240,5 @@ This is a learning lab. Feel free to:
 
 ---
 
-**Author**: Arthur Oliveira | SRE @ IBM  
-**GitHub**: github.com/ArthrR/middleware-sre-platform
+**Author**: Arthur Silvestre Oliveira | SRE → AI Platform/MLOps Engineer  
+**GitHub**: github.com/ArthrR/ai-platform-lab

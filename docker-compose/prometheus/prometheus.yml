@@ -55,3 +55,9 @@ scrape_configs:
   - job_name: 'redis'
     static_configs:
       - targets: ['redis:6379']
+
+  # AI Gateway - LLM/RAG inference metrics (ai profile only)
+  - job_name: 'ai-gateway'
+    static_configs:
+      - targets: ['ai-gateway:8000']
+    metrics_path: '/metrics'

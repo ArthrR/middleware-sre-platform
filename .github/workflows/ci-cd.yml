@@ -31,36 +31,49 @@ jobs:
             kubernetes/tomcat.yaml
             kubernetes/monitoring.yaml
             kubernetes/ingress.yaml
+            kubernetes/ai-gateway.yaml
+            kubernetes/qdrant.yaml
 
-      - name: Lint Docker Compose
+      - name: Lint Docker Compose (core + ai profile)
         run: |
           cd docker-compose
-          docker compose config --quiet
+          docker compose --profile ai config --quiet
           echo "✅ Docker Compose config is valid"
 
       - name: Validate Prometheus config
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}/prometheus:/etc/prometheus \
+          set -e
+          docker run -d --name prom-validate \
+            -v ${{ github.workspace }}/docker-compose/prometheus:/etc/prometheus \
             prom/prometheus:latest \
             --config.file=/etc/prometheus/prometheus.yml \
-            --web.listen-address=":9999" &
+            --web.listen-address=":9999"
           sleep 3
-          kill %1 2>/dev/null || true
+          RUNNING=$(docker inspect -f '{{.State.Running}}' prom-validate)
+          docker logs prom-validate
+          docker rm -f prom-validate >/dev/null
+          if [ "$RUNNING" != "true" ]; then
+            echo "❌ Prometheus config is invalid"
+            exit 1
+          fi
           echo "✅ Prometheus config is valid"
 
-  # ─── Stage 2: Build Docker Image ────────────────────────────────────
+  # ─── Stage 2: Build Docker Images ───────────────────────────────────
   build:
-    name: Build & Push Image
+    name: Build & Push (${{ matrix.name }})
     runs-on: ubuntu-latest
     needs: lint
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-      image_digest: ${{ steps.build.outputs.digest }}
+    strategy:
+      matrix:
+        include:
+          - name: nodejs-app
+            context: docker-compose/apps/nodejs
+          - name: ai-gateway
+            context: docker-compose/apps/ai-gateway
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -76,7 +89,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/nodejs-app
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.name }}
           tags: |
             type=sha,prefix=sha-
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
@@ -85,20 +98,32 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: docker-compose/apps/nodejs
+          context: ${{ matrix.context }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   # ─── Stage 3: Deploy to Kubernetes ──────────────────────────────────
+  # Deploys the `:latest` tag published above; the sha-tagged image stays in
+  # GHCR for traceability/rollback-by-digest. `kubectl rollout undo` below
+  # handles rollback via Kubernetes' own revision history, not tag pinning.
   deploy:
-    name: Deploy to Cluster
+    name: Deploy to Cluster (${{ matrix.name }})
     runs-on: ubuntu-latest
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
+    strategy:
+      matrix:
+        include:
+          - name: nodejs-app
+            deployment: nodejs-api
+            container: nodejs
+          - name: ai-gateway
+            deployment: ai-gateway
+            container: ai-gateway
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -117,11 +142,17 @@ jobs:
           kubectl apply -f kubernetes/namespace.yaml
           echo "✅ Namespace applied"
 
+      - name: Resolve lowercase image path
+        id: image
+        run: echo "name_lower=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+
       - name: Update image tag in deployment
         run: |
-          IMAGE_TAG=$(echo "${{ needs.build.outputs.image_tag }}" | head -1)
-          kubectl set image deployment/nodejs-app \
-            nodejs-app=${IMAGE_TAG} \
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ steps.image.outputs.name_lower }}/${{ matrix.name }}:latest"
+          kubectl set image "deployment/${{ matrix.deployment }}" \
+            "${{ matrix.container }}=${IMAGE_TAG}" \
             -n enterprise-middleware \
             --record
           echo "🚀 Deploying image: ${IMAGE_TAG}"
@@ -135,14 +166,14 @@ jobs:
         id: rollout
         run: |
           echo "⏳ Waiting for rollout to complete..."
-          if kubectl rollout status deployment/nodejs-app \
+          if kubectl rollout status deployment/${{ matrix.deployment }} \
               -n enterprise-middleware \
               --timeout=180s; then
             echo "✅ Rollout successful"
-            echo "rollout_status=success" >> $GITHUB_OUTPUT
+            echo "rollout_status=success" >> "$GITHUB_OUTPUT"
           else
             echo "❌ Rollout failed — triggering rollback"
-            echo "rollout_status=failed" >> $GITHUB_OUTPUT
+            echo "rollout_status=failed" >> "$GITHUB_OUTPUT"
             exit 1
           fi
 
@@ -150,18 +181,21 @@ jobs:
         if: failure() && steps.rollout.outputs.rollout_status == 'failed'
         run: |
           echo "🔄 Rolling back deployment..."
-          kubectl rollout undo deployment/nodejs-app -n enterprise-middleware
-          kubectl rollout status deployment/nodejs-app \
+          kubectl rollout undo deployment/${{ matrix.deployment }} -n enterprise-middleware
+          kubectl rollout status deployment/${{ matrix.deployment }} \
             -n enterprise-middleware \
             --timeout=120s
           echo "✅ Rollback completed"
 
   # ─── Stage 4: Post-Deploy Health Check ──────────────────────────────
   healthcheck:
-    name: Post-Deploy Health Check
+    name: Post-Deploy Health Check (${{ matrix.deployment }})
     runs-on: ubuntu-latest
     needs: deploy
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    strategy:
+      matrix:
+        deployment: [nodejs-api, ai-gateway]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -175,14 +209,14 @@ jobs:
       - name: Run health checks
         run: |
           chmod +x scripts/bash/healthcheck-deploy.sh
-          bash scripts/bash/healthcheck-deploy.sh
+          bash scripts/bash/healthcheck-deploy.sh enterprise-middleware ${{ matrix.deployment }}
 
       - name: Verify SLO — pod availability
         run: |
-          READY=$(kubectl get deployment nodejs-app \
+          READY=$(kubectl get deployment ${{ matrix.deployment }} \
             -n enterprise-middleware \
             -o jsonpath='{.status.readyReplicas}')
-          DESIRED=$(kubectl get deployment nodejs-app \
+          DESIRED=$(kubectl get deployment ${{ matrix.deployment }} \
             -n enterprise-middleware \
             -o jsonpath='{.spec.replicas}')
 
@@ -197,6 +231,7 @@ jobs:
         if: success()
         run: |
           echo "🎉 Deployment completed successfully!"
+          echo "   Deployment: ${{ matrix.deployment }}"
           echo "   Commit: ${{ github.sha }}"
           echo "   Author: ${{ github.actor }}"
           echo "   Branch: ${{ github.ref_name }}"

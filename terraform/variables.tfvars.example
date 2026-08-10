@@ -1,5 +1,5 @@
 # =============================================================
-# Example variable overrides for middleware-sre-platform
+# Example variable overrides for ai-platform-lab
 # Copy to terraform.tfvars and adjust as needed
 # Never commit terraform.tfvars to version control!
 # =============================================================
@@ -10,3 +10,4 @@ namespace        = "enterprise-middleware"
 environment      = "local"             # local | staging | prod
 app_replicas     = 2
 enable_monitoring = true
+enable_ai_platform = false   # set true to deploy the ai-gateway ConfigMap + Qdrant via Helm

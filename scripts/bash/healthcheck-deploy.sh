@@ -9,7 +9,7 @@ set -euo pipefail
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 NAMESPACE="${1:-enterprise-middleware}"
-DEPLOYMENT="${2:-nodejs-app}"
+DEPLOYMENT="${2:-nodejs-api}"
 MAX_RETRIES=10
 RETRY_INTERVAL=10
 HEALTH_ENDPOINT="http://localhost/health"
@@ -196,7 +196,7 @@ print_summary() {
 main() {
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo " 🏥  SRE HEALTH CHECK — middleware-sre-platform"
+  echo " 🏥  SRE HEALTH CHECK — ai-platform-lab"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
 

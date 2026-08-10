@@ -4,20 +4,21 @@
 
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose/)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-Manifests-326CE5?logo=kubernetes)](kubernetes/)
-[![Monitoring](https://img.shields.io/badge/Monitoring-Prometheus%20%7C%20Grafana-E6522C)](prometheus/)
+[![Monitoring](https://img.shields.io/badge/Monitoring-Prometheus%20%7C%20Grafana-E6522C)](docker-compose/prometheus/)
 [![Terraform](https://img.shields.io/badge/Infra-Terraform-623CE4?logo=terraform)](terraform/)
+[![MLflow](https://img.shields.io/badge/MLOps-MLflow-0194E2)](ml/)
 
 ---
 
 ## 📖 About This Project
 
-This repository started as a **SRE reference platform** and is now evolving into a **full AI Platform / MLOps lab**.
+This repository started as an SRE reference platform and now includes a working AI Platform / MLOps layer on top of it — not just a roadmap for one.
 
 It showcases:
 - Enterprise-grade infrastructure patterns (Docker, Kubernetes, Terraform)
-- Monitoring and observability (Prometheus, Grafana, ELK)
-- Automation practices (scripts, CI/CD)
-- And, increasingly, **AI workloads**: LLM serving, RAG pipelines, and MLOps tooling
+- Monitoring and observability (Prometheus, Grafana, ELK) — extended with LLM inference metrics
+- Automation practices (scripts, CI/CD) — extended with a matrix build/deploy for the AI services
+- **AI workloads**: local LLM serving (Ollama), a RAG pipeline (Qdrant) that answers questions about this repo's own docs, and MLOps tooling (MLflow + DVC) for a model trained on this lab's own SRE metrics
 
 **Purpose:** educational sandbox for:
 - Practicing SRE and platform engineering
@@ -28,9 +29,9 @@ It showcases:
 
 ## 🎯 What's Inside
 
-### 🐳 Docker Compose Stack (12+ Services)
+### 🐳 Docker Compose Stack
 
-Complete containerized environment with real-world integrations:
+Core services always on; AI services are an opt-in profile so a plain `docker compose up -d` stays lightweight.
 
 | Category | Services | Purpose |
 |----------|----------|---------|
@@ -40,13 +41,14 @@ Complete containerized environment with real-world integrations:
 | **Messaging** | RabbitMQ | Async message queue |
 | **Observability** | Prometheus + Grafana + Node Exporter | Metrics collection & visualization |
 | **Logging** | Elasticsearch + Logstash + Kibana | Centralized log management (ELK Stack) |
-| **AI (planned)** | Ollama / vLLM + FastAPI + Qdrant | LLM serving and RAG pipelines |
+| **AI** (`ai` profile) | Ollama + Qdrant + FastAPI AI Gateway | Local LLM serving, vector search, chat/RAG endpoints |
+| **MLOps** (`ai` profile) | MLflow | Experiment tracking + model registry |
 
 **Quick Start:**
 ```bash
 cd docker-compose
-bash setup.sh
-docker compose up -d
+docker compose up -d              # core stack
+docker compose --profile ai up -d # + AI/MLOps services (see docker-compose/apps/ai-gateway/README.md)
 ```
 
 ---
@@ -55,13 +57,13 @@ docker compose up -d
 
 Enterprise patterns with best practices:
 
-- **Horizontal Pod Autoscaler (HPA)** on application workloads (CPU-based scaling)
+- **Horizontal Pod Autoscaler (HPA)** on application workloads (CPU-based scaling), including the AI gateway
 - **StatefulSet** for PostgreSQL with persistent volumes
 - **Secrets** for credential management
 - **RBAC** for Prometheus service discovery
 - **Ingress Controller** for routing
 - **Health checks** and resource limits on all pods
-- **(Planned)** AI workloads: LLM deployments and RAG services
+- **AI workloads**: `ai-gateway` and `qdrant` Deployments (Ollama/MLflow stay docker-compose-only by design — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md))
 
 **Deploy:**
 ```bash
@@ -73,6 +75,12 @@ kubectl get all -n enterprise-middleware
 ---
 
 ## 💻 Sample Applications
+
+### AI Gateway (FastAPI)
+- `/chat` — direct LLM completion via Ollama
+- `/rag/query` — retrieval-augmented answers grounded in this repo's own docs (Qdrant + Ollama embeddings)
+- `/metrics` — Prometheus exposition: request rate, inference latency, real tokens/sec, RAG chunk counts, errors
+- See [`docker-compose/apps/ai-gateway/README.md`](docker-compose/apps/ai-gateway/README.md)
 
 ### Node.js Express API
 - REST endpoints with PostgreSQL integration
@@ -89,10 +97,11 @@ kubectl get all -n enterprise-middleware
 - HTML/CSS/JS dashboard
 - Service monitoring interface
 
-### (Planned) AI Services
-- FastAPI AI gateway
-- LLM chat and completion endpoints
-- RAG endpoint using vector search and context injection
+---
+
+## 🧪 MLOps
+
+`ml/anomaly-detection/` trains an `IsolationForest` on SRE-shaped metrics (cpu/latency/error-rate) and logs the run to MLflow — params, metrics, a plot artifact, and a registered model. Chosen over a generic tutorial dataset specifically to tie back to this lab's SRE side (anomaly detection on infra metrics is a real AIOps pattern). Includes an optional path to train against this lab's own live Prometheus data instead of the committed synthetic set, and minimal DVC versioning for the dataset. See [`ml/README.md`](ml/README.md).
 
 ---
 
@@ -101,8 +110,8 @@ kubectl get all -n enterprise-middleware
 ### Metrics (Prometheus + Grafana)
 - System metrics via Node Exporter
 - Application metrics from custom endpoints
-- Pre-configured dashboards
-- **Upcoming:** AI-specific metrics (inference latency, tokens/sec, error rates)
+- **AI Gateway metrics**: inference latency, real tokens/sec (from Ollama's own telemetry), RAG retrieval size, error rate — pre-built Grafana dashboard auto-provisioned at `ai-gateway`
+- See [`docker-compose/prometheus/queries.md`](docker-compose/prometheus/queries.md) for example PromQL
 
 ### Logs (ELK Stack)
 - Centralized log aggregation
@@ -124,20 +133,23 @@ kubectl get all -n enterprise-middleware
 
 ### Bash
 - Nginx status verification
-- Container orchestration helpers
+- Post-deploy health checks with automatic rollback (`scripts/bash/healthcheck-deploy.sh`), reused for both `nodejs-api` and `ai-gateway` deployments
 
 ### Python
 - Tomcat automation
 - Deployment validation
-- **Future:** AI pipeline helpers (data ingestion, embedding generation)
+- MLOps training + Prometheus data export (`ml/anomaly-detection/`)
 
 ### Makefile
 Quick commands for Docker Compose operations:
 ```bash
-make up      # Start services
-make down    # Stop services
-make logs    # View logs
-make clean   # Remove all data
+make up            # Start core services
+make ai-up         # Start core + AI services
+make ai-pull-model # Pull the Ollama chat + embedding models
+make ai-ingest     # Index this repo's docs into Qdrant for RAG
+make down          # Stop all services
+make logs          # View logs
+make clean         # Remove all data
 ```
 
 ---
@@ -146,13 +158,13 @@ make clean   # Remove all data
 
 This lab demonstrates proficiency in:
 
-✅ **Container Orchestration** — Docker Compose + Kubernetes  
-✅ **Infrastructure as Code** — Declarative configs, GitOps-ready  
-✅ **Observability** — Metrics, logs, health checks  
-✅ **High Availability** — Autoscaling, replication, load balancing  
-✅ **Security** — Secrets management, RBAC, network policies  
-✅ **Automation** — Scripts across Windows/Linux environments  
-✅ **Emerging AI Platform Skills** — LLM serving, RAG, MLOps (ongoing work)  
+✅ **Container Orchestration** — Docker Compose + Kubernetes
+✅ **Infrastructure as Code** — Terraform, declarative configs, GitOps-ready
+✅ **Observability** — Metrics, logs, health checks, including LLM inference telemetry
+✅ **High Availability** — Autoscaling, replication, load balancing
+✅ **Security** — Secrets management, RBAC, network policies
+✅ **Automation** — Scripts across Windows/Linux environments, matrix CI/CD
+✅ **AI Platform Skills** — Local LLM serving, RAG pipelines, MLOps (MLflow, DVC), inference observability
 
 ---
 
@@ -170,18 +182,23 @@ This lab demonstrates proficiency in:
 
 ### Prerequisites
 - Docker Desktop 20.10+
-- Kubernetes cluster (Minikube/Kind/Docker Desktop)
-- 8GB RAM minimum
-- 20GB disk space
+- Kubernetes cluster (Minikube/Kind/Docker Desktop) — optional, for the k8s manifests
+- 8GB RAM minimum (16GB recommended with the `ai` profile running)
+- 20GB disk space (+ ~2GB for the default Ollama models)
 
 ### Quick Deploy
 ```bash
-# Clone repository
 git clone https://github.com/ArthrR/ai-platform-lab.git
 cd ai-platform-lab
 
-# Option 1: Docker Compose
+# Option 1: Docker Compose (core stack)
 cd docker-compose && docker compose up -d
+
+# Option 1b: + AI/MLOps services
+docker compose --profile ai up -d
+docker compose exec ollama ollama pull llama3.2:1b
+docker compose exec ollama ollama pull nomic-embed-text
+docker compose --profile ai run --rm ai-gateway python -m ingest.ingest_docs
 
 # Option 2: Kubernetes
 cd kubernetes && kubectl apply -f .
@@ -194,59 +211,38 @@ cd kubernetes && kubectl apply -f .
 ```text
 ai-platform-lab/
 ├── docker-compose/          # Container orchestration
-│   ├── apps/                # Sample applications
-│   ├── nginx/               # Reverse proxy configs
-│   ├── prometheus/          # Monitoring configs
-│   └── docker-compose.yml   # Service definitions
-├── kubernetes/              # K8s manifests
-│   ├── namespace.yaml
-│   ├── deployments/
-│   ├── services/
-│   └── monitoring/
-├── prometheus/              # Prometheus-specific configs
-├── terraform/               # Infrastructure provisioning (cloud-ready)
-├── scripts/                 # Automation scripts
-│   ├── powershell/
-│   ├── bash/
-│   └── python/
-└── docs/                    # Additional documentation
+│   ├── apps/                # Sample applications (nodejs, java, ai-gateway)
+│   ├── nginx/                # Reverse proxy configs
+│   ├── prometheus/          # Monitoring configs + PromQL cheat sheet
+│   ├── grafana/              # Dashboard provisioning
+│   └── docker-compose.yml   # Service definitions (core + "ai" profile)
+├── kubernetes/               # K8s manifests (flat: namespace, per-service Deployment+Service, ai-gateway, qdrant)
+├── terraform/                # Infrastructure provisioning (namespace/quota/network policies/Helm)
+├── ml/                       # Offline MLOps: anomaly-detection training + MLflow + DVC
+├── scripts/                  # Automation scripts (powershell/, bash/, python/)
+└── docs/                     # ARCHITECTURE.md — design rationale for the AI platform additions
 ```
 
 ---
 
 ## 🔧 Configuration
 
-All services use environment variables for configuration. See `.env.example` in each directory.
+All services use environment variables for configuration. See `.env.example` / `docker-compose/.env` in each directory.
 
 **Key Configuration Files:**
-- `docker-compose/.env` - Service credentials
-- `prometheus/prometheus.yml` - Scrape configs
-- `kubernetes/secrets.yaml` - K8s secrets
-
----
-
-## 📈 Roadmap (AI/MLOps Focus)
-
-Future enhancements planned:
-
-- [ ] LLM serving with Ollama or vLLM
-- [ ] FastAPI AI gateway with chat and RAG endpoints
-- [ ] Qdrant vector database for semantic search
-- [ ] MLflow integration for experiment tracking
-- [ ] DVC for dataset versioning
-- [ ] CI/CD pipeline examples for AI workloads
-- [ ] Evidently AI for model performance and data drift monitoring
-- [ ] Terraform modules for cloud AI infrastructure (Azure/AWS)
+- `docker-compose/.env` — service credentials + AI model/collection names
+- `docker-compose/prometheus/prometheus.yml` — scrape configs (core + `ai-gateway`)
+- `kubernetes/*.yaml` — per-service manifests, including `ai-gateway.yaml` / `qdrant.yaml`
 
 ---
 
 ## 👤 Author
 
-**Arthur Silvestre Oliveira**  
-AI Platform / MLOps Engineer (transitioning from SRE)  
-📧 arthur.oliveiraa254@gmail.com  
+**Arthur Silvestre Oliveira**
+AI Platform / MLOps Engineer (transitioning from SRE)
+📧 arthur.oliveiraa254@gmail.com
 🔗 [LinkedIn](https://linkedin.com/in/arthur-s-oliveira) | [GitHub](https://github.com/ArthrR)
 
 ---
 
-**⚠️ Note**: This is a learning environment. For production deployments, additional security hardening, high-availability configurations, and disaster recovery strategies should be implemented.
+**⚠️ Note**: This is a learning environment. For production deployments, additional security hardening, high-availability configurations, and disaster recovery strategies should be implemented. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for known limitations of the AI platform additions specifically.

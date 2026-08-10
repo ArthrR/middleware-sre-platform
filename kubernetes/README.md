@@ -54,14 +54,14 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/cont
 ### Deploy All Resources
 ```bash
 # Apply in order
-kubectl apply -f k8s-namespace.yaml
-kubectl apply -f k8s-postgres.yaml
-kubectl apply -f k8s-redis.yaml
-kubectl apply -f k8s-tomcat.yaml
-kubectl apply -f k8s-nodejs.yaml
-kubectl apply -f k8s-nginx.yaml
-kubectl apply -f k8s-monitoring.yaml
-kubectl apply -f k8s-ingress.yaml
+kubectl apply -f namespace.yaml
+kubectl apply -f postgres.yaml
+kubectl apply -f redis.yaml
+kubectl apply -f tomcat.yaml
+kubectl apply -f nodejs.yaml
+kubectl apply -f nginx.yaml
+kubectl apply -f monitoring.yaml
+kubectl apply -f ingress.yaml
 
 # Or apply all at once
 kubectl apply -f .
@@ -297,5 +297,5 @@ kubectl delete -f .
 
 ---
 
-**Author**: Arthur Oliveira | SRE @ IBM  
-**GitHub**: github.com/ArthrR/middleware-sre-platform
+**Author**: Arthur Silvestre Oliveira | SRE → AI Platform/MLOps Engineer  
+**GitHub**: github.com/ArthrR/ai-platform-lab
