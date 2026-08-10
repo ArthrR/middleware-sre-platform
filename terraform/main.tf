@@ -269,11 +269,11 @@ resource "kubernetes_config_map" "ai_gateway_config" {
   }
 
   data = {
-    OLLAMA_BASE_URL   = "http://host.docker.internal:11434"
-    OLLAMA_MODEL      = "llama3.2:1b"
+    OLLAMA_BASE_URL    = "http://host.docker.internal:11434"
+    OLLAMA_MODEL       = "llama3.2:1b"
     OLLAMA_EMBED_MODEL = "nomic-embed-text"
-    QDRANT_URL        = "http://qdrant-service:6333"
-    QDRANT_COLLECTION = "lab-docs"
+    QDRANT_URL         = "http://qdrant-service:6333"
+    QDRANT_COLLECTION  = "lab-docs"
   }
 }
 
