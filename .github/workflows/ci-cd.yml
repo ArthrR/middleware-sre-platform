@@ -118,11 +118,13 @@ jobs:
   # Deploys the `:latest` tag published above; the sha-tagged image stays in
   # GHCR for traceability/rollback-by-digest. `kubectl rollout undo` below
   # handles rollback via Kubernetes' own revision history, not tag pinning.
+  # Skips cleanly (not a failure) when no KUBECONFIG secret is configured —
+  # this lab has no cloud-hosted cluster for GitHub-hosted runners to reach.
   deploy:
     name: Deploy to Cluster (${{ matrix.name }})
     runs-on: ubuntu-latest
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.HAS_REMOTE_CLUSTER == 'true'
     environment: production
     strategy:
       matrix:
@@ -197,11 +199,12 @@ jobs:
           echo "✅ Rollback completed"
 
   # ─── Stage 4: Post-Deploy Health Check ──────────────────────────────
+  # Same gate as deploy: skips cleanly when there's no remote cluster to check.
   healthcheck:
     name: Post-Deploy Health Check (${{ matrix.deployment }})
     runs-on: ubuntu-latest
     needs: deploy
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.HAS_REMOTE_CLUSTER == 'true'
     strategy:
       matrix:
         deployment: [nodejs-api, ai-gateway]
