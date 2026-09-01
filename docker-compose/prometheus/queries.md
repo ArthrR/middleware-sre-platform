@@ -37,6 +37,23 @@ histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="nodejs-a
 rate(node_disk_io_time_seconds_total[5m])
 ```
 
+## Kafka (Message Queue, via `kafka-exporter`)
+
+### Broker count (up = healthy cluster)
+```promql
+kafka_brokers
+```
+
+### Messages produced per topic (offset growth)
+```promql
+rate(kafka_topic_partition_current_offset[5m])
+```
+
+### Consumer group lag
+```promql
+kafka_consumergroup_lag
+```
+
 ## Kubernetes (when deployed via `kubernetes/monitoring.yaml`)
 
 ### Node CPU

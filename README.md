@@ -38,7 +38,7 @@ Core services always on; AI services are an opt-in profile so a plain `docker co
 | **Web Tier** | Nginx | Reverse proxy & load balancer |
 | **Application Tier** | Tomcat 10 + Node.js 18 | Java & JavaScript runtime environments |
 | **Data Tier** | PostgreSQL 15 + Redis 7 | Relational database + distributed cache |
-| **Messaging** | RabbitMQ | Async message queue |
+| **Messaging** | RabbitMQ + Kafka | Async message queue + event streaming (Kafka in KRaft mode, no Zookeeper) |
 | **Observability** | Prometheus + Grafana + Node Exporter | Metrics collection & visualization |
 | **Logging** | Elasticsearch + Logstash + Kibana | Centralized log management (ELK Stack) |
 | **AI** (`ai` profile) | Ollama + Qdrant + FastAPI AI Gateway | Local LLM serving, vector search, chat/RAG endpoints |
@@ -111,6 +111,7 @@ kubectl get all -n enterprise-middleware
 - System metrics via Node Exporter
 - Application metrics from custom endpoints
 - **AI Gateway metrics**: inference latency, real tokens/sec (from Ollama's own telemetry), RAG retrieval size, error rate — pre-built Grafana dashboard auto-provisioned at `ai-gateway`
+- **Kafka metrics**: broker health, topic offsets, consumer group lag via `kafka-exporter`
 - See [`docker-compose/prometheus/queries.md`](docker-compose/prometheus/queries.md) for example PromQL
 
 ### Logs (ELK Stack)
@@ -138,6 +139,7 @@ kubectl get all -n enterprise-middleware
 ### Python
 - Tomcat automation
 - Deployment validation
+- Kafka producer/consumer example — simulated infra events (`scripts/python/kafka/`)
 - MLOps training + Prometheus data export (`ml/anomaly-detection/`)
 
 ### Makefile
@@ -147,6 +149,8 @@ make up            # Start core services
 make ai-up         # Start core + AI services
 make ai-pull-model # Pull the Ollama chat + embedding models
 make ai-ingest     # Index this repo's docs into Qdrant for RAG
+make kafka-produce # Publish simulated infra events to Kafka
+make kafka-consume # Consume infra events from Kafka
 make down          # Stop all services
 make logs          # View logs
 make clean         # Remove all data

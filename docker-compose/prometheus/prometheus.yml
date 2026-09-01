@@ -56,6 +56,11 @@ scrape_configs:
     static_configs:
       - targets: ['redis:6379']
 
+  # Kafka Exporter - broker/topic/consumer-group metrics
+  - job_name: 'kafka-exporter'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+
   # AI Gateway - LLM/RAG inference metrics (ai profile only)
   - job_name: 'ai-gateway'
     static_configs:

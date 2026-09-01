@@ -1,5 +1,5 @@
 # Makefile for ai-platform-lab
-.PHONY: help up down restart logs ps clean setup ai-up ai-down ai-pull-model ai-ingest
+.PHONY: help up down restart logs ps clean setup ai-up ai-down ai-pull-model ai-ingest kafka-produce kafka-consume
 
 help:
 	@echo "Available commands:"
@@ -14,6 +14,8 @@ help:
 	@echo "  make ai-down      - Stop AI services"
 	@echo "  make ai-pull-model - Pull the chat + embedding models into Ollama"
 	@echo "  make ai-ingest    - Index the repo's docs into Qdrant for RAG"
+	@echo "  make kafka-produce - Publish simulated infra events to Kafka"
+	@echo "  make kafka-consume - Consume infra events from Kafka"
 
 setup:
 	@bash setup.sh
@@ -57,3 +59,9 @@ ai-pull-model:
 
 ai-ingest:
 	@docker compose --profile ai run --rm ai-gateway python -m ingest.ingest_docs
+
+kafka-produce:
+	@python3 ../scripts/python/kafka/producer.py
+
+kafka-consume:
+	@python3 ../scripts/python/kafka/consumer.py
